@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#000000">
+<title>Kodec</title>
+<meta name="description" content="A creative effect engine for type and photos: scan drag, warps, stipple, halftone, grain, glow and color, with keyframes and LFOs. Exports with a transparent background.">
+<!-- Security rules: this site has no server of its own, so they live here. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: blob: https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="icon" href="media/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&display=swap">
+<link rel="stylesheet" href="src/styles.css">
+<script>
+  // the saved appearance, before anything paints (Settings changes it later)
+  (function () {
+    var r = document.documentElement;
+    window.kodecAppearance = function (ui) {
+      if (ui.theme === 'system') r.removeAttribute('data-theme'); else r.dataset.theme = ui.theme || 'dark';
+      r.style.setProperty('--t', ui.textSize || 1);
+      r.dataset.rack = ui.rackSide || 'right';
+      r.dataset.tl = ui.tlPos || 'bottom';
+      r.style.setProperty('--rack-w', (ui.rackW || 372) + 'px');
+      r.style.setProperty('--tl-h', (ui.tlH || 290) + 'px');
+      if (ui.accent) {
+        var n = parseInt(ui.accent.slice(1), 16);
+        var lum = (0.2126 * (n >> 16 & 255) + 0.7152 * (n >> 8 & 255) + 0.0722 * (n & 255)) / 255;
+        r.style.setProperty('--accent', ui.accent);
+        r.style.setProperty('--on-accent', lum > 0.55 ? '#140a04' : '#ffffff');
+      } else {
+        r.style.removeProperty('--accent');
+        r.style.removeProperty('--on-accent');
+      }
+    };
+    try { kodecAppearance(JSON.parse(localStorage.getItem('kodec.ui') || '{}')); } catch (e) {}
+  })();
+</script>
+</head>
+<body>
+<div class="app" id="app">
+  <header class="nav">
+    <a class="brand" href="./" aria-label="Kodec, home">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-kodec"/></svg>
+      <span class="brand-name">Kodec</span>
+    </a>
+    <p class="nav-source"><span id="srcName"></span><span id="badge"></span></p>
+    <div class="nav-links">
+      <div class="tool-group">
+        <button class="nav-icon" id="undoBtn" type="button" aria-label="Undo" title="Undo (⌘Z)" disabled><svg class="i" viewBox="0 0 24 24"><use href="#i-undo"/></svg></button>
+        <button class="nav-icon" id="redoBtn" type="button" aria-label="Redo" title="Redo (⇧⌘Z)" disabled><svg class="i" viewBox="0 0 24 24"><use href="#i-redo"/></svg></button>
+        <button class="nav-icon" id="historyBtn" type="button" aria-label="History" title="History: go back to any point in this session" aria-expanded="false"><svg class="i" viewBox="0 0 24 24"><use href="#i-clock"/></svg></button>
+      </div>
+      <div class="tool-group">
+        <button class="nav-link" id="toolsBtn" type="button" aria-expanded="false">Tools</button>
+        <button class="nav-icon" id="settingsBtn" type="button" aria-label="Settings" title="Appearance and layout"><svg class="i" viewBox="0 0 24 24"><use href="#i-sliders"/></svg></button>
+        <button class="nav-icon" id="themeBtn" type="button" aria-label="Switch between light and dark appearance" title="Appearance">
+          <svg class="i theme-light" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
+          <svg class="i theme-dark" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
+        </button>
+      </div>
+      <div class="tool-group">
+        <button class="nav-link" id="openBtn" type="button">Open</button>
+        <input type="file" id="file" accept="image/*,video/*,.ttf,.otf,.woff,.woff2" hidden>
+        <button class="nav-link" id="stillBtn" type="button" title="Save this frame as a PNG, with its transparency">Save PNG</button>
+      </div>
+      <button class="btn btn-primary btn-sm" id="recBtn" type="button">Export<span class="wide">Video</span></button>
+    </div>
+  </header>
+
+  <div class="work" id="work">
+    <section class="stage" aria-label="Preview">
+      <div class="viewport" id="viewport">
+        <canvas id="out" aria-label="Processed preview"></canvas>
+        <div class="split" id="split" hidden></div>
+        <div class="rec" id="rec" hidden>
+          <div class="rec-head">
+            <span class="rec-title"><span class="rec-dot" id="recDot"></span><span id="recTitle">Recording</span></span>
+            <span class="rec-time" id="recTime">0:00 / 0:00</span>
+          </div>
+          <div class="progress"><span id="recBar"></span></div>
+          <p class="rec-note" id="recNote"></p>
+          <div class="rec-row" id="recActions"></div>
+          <p class="rec-link" id="recLink" hidden>Need a GIF, MOV or MP3? Save this, then convert it in <a href="https://covrt.nathanetes.com" target="_blank" rel="noopener">covrt</a> or, on your phone, <a href="https://cobalt.nathanetes.com" target="_blank" rel="noopener">cobalt</a>.</p>
+        </div>
+      </div>
+      <div class="transport" id="transport">
+        <button class="icon-btn play" id="playBtn" type="button" aria-label="Pause" title="Play or pause (Space)"></button>
+        <input class="scrub" type="range" id="scrub" min="0" max="1000" value="0" step="1" aria-label="Position">
+        <span class="timecode" id="time">0:00 / 0:00</span>
+        <button class="icon-btn" id="muteBtn" type="button" aria-pressed="false" aria-label="Sound" title="Sound"></button>
+        <button class="icon-btn" id="bdBtn" type="button" aria-pressed="false" aria-label="Light backdrop" title="Backdrop behind the transparent parts: dark or light (B)"><svg class="i" viewBox="0 0 24 24"><use href="#i-checker"/></svg></button>
+        <button class="icon-btn" id="compareBtn" type="button" aria-pressed="false" aria-label="Compare" title="Compare: drag on the picture to move the split (C)"><svg class="i" viewBox="0 0 24 24"><use href="#i-compare"/></svg></button>
+        <button class="icon-btn" id="zoomBtn" type="button" aria-pressed="false" aria-label="View at 100%" title="View output pixels at 100% (Z)"><svg class="i" viewBox="0 0 24 24"><use href="#i-pixels"/></svg></button>
+        <button class="icon-btn" id="fsBtn" type="button" aria-label="Full screen" title="Full screen"><svg class="i" viewBox="0 0 24 24"><use href="#i-expand"/></svg></button>
+      </div>
+    </section>
+
+    <div class="resizer resizer-x" id="rackResize" role="separator" aria-orientation="vertical" aria-label="Resize controls"></div>
+
+    <aside class="rack" id="rack" aria-label="Controls">
+      <div class="rack-head" id="rackTabs" role="tablist" aria-label="Controls"></div>
+      <div class="rack-scroll">
+        <div id="pane-source">
+          <section class="sec">
+            <div id="kindSeg"></div>
+            <div class="src-box" id="textBox">
+              <textarea class="text-in" id="textIn" rows="3" spellcheck="false" placeholder="Type your words" aria-label="Text"></textarea>
+              <div class="field-row"><label class="field-name" for="fontSel">Font</label><select class="select" id="fontSel"></select></div>
+              <div class="field-row"><span class="field-name">Align</span><div id="alignSeg"></div></div>
+              <div class="field-row"><span class="field-name">Case</span><div id="capsSeg"></div></div>
+              <div class="sec-actions">
+                <button class="btn btn-plain btn-xs" id="fontBtn" type="button">Load a Font File</button>
+                <input type="file" id="fontFile" accept=".ttf,.otf,.woff,.woff2" hidden>
+              </div>
+            </div>
+            <div class="src-box" id="mediaBox" hidden>
+              <p class="hint" id="mediaNote"></p>
+              <button class="btn btn-secondary btn-xs" id="mediaOpen" type="button"><svg class="i" viewBox="0 0 24 24"><use href="#i-upload"/></svg>Open Another</button>
+              <p class="fineprint">A PNG keeps its own transparency. You can also drop a file anywhere, or paste an image.</p>
+            </div>
+          </section>
+          <section class="sec" id="typeSec">
+            <h2 class="sec-title">Type</h2>
+            <div class="ctls" id="src-type"></div>
+          </section>
+          <section class="sec">
+            <h2 class="sec-title">Place</h2>
+            <div class="ctls" id="src-place"></div>
+          </section>
+          <section class="sec">
+            <h2 class="sec-title">Canvas</h2>
+            <div class="field-row">
+              <label class="field-name" for="shapeSel">Shape</label>
+              <select class="select" id="shapeSel">
+                <option value="0">Same as Source</option>
+                <option value="1">1:1 · cover</option>
+                <option value="0.8">4:5</option>
+                <option value="0.75">3:4</option>
+                <option value="0.6667">2:3 · poster</option>
+                <option value="0.5625">9:16 · story</option>
+                <option value="1.3333">4:3</option>
+                <option value="1.5">3:2</option>
+                <option value="1.7778">16:9</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <label class="field-name" for="outSize">Long Side</label>
+              <select class="select" id="outSize"></select>
+            </div>
+            <div class="ctls" id="src-canvas"></div>
+            <p class="fineprint">Looks never change anything on this tab, so your words, placement and background stay put while you try them.</p>
+          </section>
+        </div>
+        <div id="pane-looks" hidden>
+          <section class="sec">
+            <div class="chips" role="tablist" id="catTabs"></div>
+            <div class="looks-grid" id="presetGrid"></div>
+            <div class="look-tools" id="mineTools" hidden>
+              <button class="btn btn-secondary btn-xs" id="importLooks" type="button"><svg class="i" viewBox="0 0 24 24"><use href="#i-upload"/></svg>Import</button>
+              <button class="btn btn-secondary btn-xs" id="exportLooks" type="button"><svg class="i" viewBox="0 0 24 24"><use href="#i-download"/></svg>Export All</button>
+              <input type="file" id="looksFile" accept=".json,application/json" hidden>
+              <p class="fineprint" id="mineNote"></p>
+            </div>
+            <form class="save-look" id="saveForm">
+              <input id="presetName" type="text" placeholder="Name This Look" maxlength="40" aria-label="Look name" autocomplete="off">
+              <button class="btn btn-primary btn-xs" id="savePreset" type="submit">Save</button>
+            </form>
+            <div class="sec-actions">
+              <button class="btn btn-plain btn-xs" id="randomBtn" type="button">Randomize</button>
+              <button class="btn btn-plain btn-xs" id="resetBtn" type="button">Reset All</button>
+            </div>
+          </section>
+          <section class="sec" id="quickSec">
+            <h2 class="sec-title">Quick</h2>
+            <p class="hint">Each macro scales a family of controls. 1.00 leaves the look as it is.</p>
+          </section>
+        </div>
+        <div id="pane-adjust" hidden>
+          <div class="search-bar">
+            <svg class="i" viewBox="0 0 24 24"><use href="#i-search"/></svg>
+            <input type="search" id="paramSearch" placeholder="Search controls" aria-label="Search controls" autocomplete="off">
+          </div>
+          <section class="sec" id="pinnedSec" hidden>
+            <h2 class="sec-title">Pinned</h2>
+            <div class="ctls" id="pinned"></div>
+          </section>
+          <section class="sec" id="masterSec">
+            <h2 class="sec-title">Master</h2>
+          </section>
+          <div id="modules"></div>
+          <p class="hint search-none" id="searchNone" hidden>No controls match that.</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="resizer resizer-y" id="tlResize" role="separator" aria-orientation="horizontal" aria-label="Resize timeline"></div>
+
+  <section class="timeline" id="timeline" aria-label="Automation timeline">
+    <div class="tl-bar">
+      <h2 class="tl-title">Automation</h2>
+      <button class="btn btn-secondary btn-xs" id="tlAdd" type="button" aria-expanded="false"><svg class="i" viewBox="0 0 24 24"><use href="#i-plus"/></svg>Add Parameter</button>
+      <span class="tl-spacer"></span>
+      <label class="tl-field" id="tlLenField">Length <input class="number" id="tlLen" type="number" min="1" max="600" step="1"> s</label>
+      <label class="tl-field">Snap
+        <select class="select select-sm" id="tlSnap">
+          <option value="frame">Frame</option>
+          <option value="0.1">0.1 s</option>
+          <option value="0.25">0.25 s</option>
+          <option value="0.5">0.5 s</option>
+          <option value="1">1 s</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <label class="tl-field tl-zoom">Zoom <input id="tlZoom" type="range" min="0" max="1" step="0.001" value="0" aria-label="Timeline zoom"></label>
+      <div id="tlHeights"></div>
+      <button class="icon-btn" id="tlHide" type="button" aria-label="Hide timeline" title="Hide timeline"><svg class="i" viewBox="0 0 24 24"><use href="#i-chevron"/></svg></button>
+    </div>
+    <div class="tl-main">
+      <div class="tl-grid" id="tlGrid">
+        <div class="tl-ruler-row"><div class="tl-corner"></div><canvas id="tlRuler" aria-hidden="true"></canvas></div>
+        <div class="tl-lanes" id="tlLanes"></div>
+        <div class="tl-empty" id="tlEmpty">
+          <p>Click <svg class="i inline" viewBox="0 0 24 24"><use href="#i-key"/></svg> next to any control to animate it with keyframes or an LFO, or press Add parameter. Each one gets a lane here.</p>
+        </div>
+        <div class="tl-playhead" id="tlHead" hidden></div>
+        <div class="tl-hscroll" id="tlScroll"><div id="tlSpacer"></div></div>
+      </div>
+      <aside class="tl-inspect" id="tlInspect" aria-label="Selected keyframe"></aside>
+    </div>
+  </section>
+  <button class="tl-show" id="tlShow" type="button"><svg class="i" viewBox="0 0 24 24"><use href="#i-chevron"/></svg>Show Timeline</button>
+</div>
+
+<div class="drop-overlay" id="drop" aria-hidden="true">
+  <div class="drop-overlay-card">
+    <svg class="i i-xl" viewBox="0 0 24 24"><use href="#i-upload"/></svg>
+    <p>Drop to open</p>
+  </div>
+</div>
+
+<div class="pop mod-pop" id="modPop" role="dialog" aria-label="Automation" hidden></div>
+<div class="pop hist-pop" id="histPop" role="dialog" aria-label="History" hidden></div>
+<div class="pop tools-pop" id="toolsPop" role="dialog" aria-label="More tools" hidden>
+  <p class="pop-eyebrow">More from Nathan Etes</p>
+  <a class="tool" href="https://atlas-crt.nathanetes.com" target="_blank" rel="noopener" id="atlasLink">
+    <span class="tool-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-atlas"/></svg></span>
+    <span class="tool-text"><strong>Atlas CRT</strong><span>The video side: tubes, tape, moiré and signal damage.</span></span>
+    <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-external"/></svg>
+  </a>
+  <a class="tool" href="https://covrt.nathanetes.com" target="_blank" rel="noopener">
+    <span class="tool-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-covrt"/></svg></span>
+    <span class="tool-text"><strong>covrt</strong><span>Convert anything, save anything. Runs on your computer.</span></span>
+    <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-external"/></svg>
+  </a>
+  <a class="tool" href="https://cobalt.nathanetes.com" target="_blank" rel="noopener">
+    <span class="tool-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-covrt"/></svg></span>
+    <span class="tool-text"><strong>cobalt</strong><span>covrt for your phone. Nothing is uploaded.</span></span>
+    <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-external"/></svg>
+  </a>
+</div>
+<div class="pop picker" id="pickPop" role="dialog" aria-label="Add a parameter" hidden>
+  <div class="picker-search">
+    <svg class="i" viewBox="0 0 24 24"><use href="#i-search"/></svg>
+    <input type="search" id="pickSearch" placeholder="Search controls" aria-label="Search controls" autocomplete="off">
+  </div>
+  <div class="picker-body">
+    <div class="picker-cats" id="pickCats" role="tablist" aria-label="Modules"></div>
+    <div class="picker-list" id="pickList"></div>
+  </div>
+</div>
+
+<dialog class="sheet" id="settings" aria-labelledby="settingsTitle">
+  <div class="sheet-head">
+    <h2 id="settingsTitle">Settings</h2>
+    <button class="nav-icon" type="button" data-close aria-label="Close"><svg class="i" viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="sheet-body" id="settingsBody"></div>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="i-kodec" viewBox="0 0 24 24"><rect x="3.2" y="3.2" width="17.6" height="17.6" rx="4.6"/><path d="M9 7.8v8.4M15.4 7.8 10.6 12l4.8 4.2"/></symbol>
+  <symbol id="i-atlas" viewBox="0 0 24 24"><rect x="2.8" y="4.6" width="18.4" height="13.6" rx="4"/><path d="M6.8 8.800h10.4M6.8 11.4h10.4M6.8 14h6.4M9 21h6"/></symbol>
+  <symbol id="i-checker" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M4 12h16M12 4v16"/><path d="M5 5h7v7H5zM12 12h7v7h-7z" fill="currentColor" stroke="none" opacity="0.45"/></symbol>
+  <symbol id="i-covrt" viewBox="0 0 24 24"><path d="M6.5 9.5a6 6 0 0 1 10.4-2.6M17.5 14.5a6 6 0 0 1-10.4 2.6"/><path d="M17.3 3.5v3.7h-3.7M6.7 20.5v-3.7h3.7"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 7 4.5 11.5 9 16"/><path d="M4.5 11.5H15a4.5 4.5 0 0 1 0 9h-2.5"/></symbol>
+  <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 7 4.5 4.5L15 16"/><path d="M19.5 11.5H9a4.5 4.5 0 0 0 0 9h2.5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2.5 12h2M19.5 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.5 13.2A8.5 8.5 0 1 1 10.8 3.5a6.6 6.6 0 0 0 9.7 9.7z"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V4m0 0L8 8m4-4 4 4M5 15v2.5A2.5 2.5 0 0 0 7.5 20h9a2.5 2.5 0 0 0 2.5-2.5V15"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 15v2.5A2.5 2.5 0 0 0 7.5 20h9a2.5 2.5 0 0 0 2.5-2.5V15"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M17 7 7 17M7 7l10 10"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5.5v13M15 5.5v13" stroke-width="2.6"/></symbol>
+  <symbol id="i-sound" viewBox="0 0 24 24"><path d="M4.5 9.5v5H8l4.5 3.5v-12L8 9.5z"/><path d="M16 9a4.2 4.2 0 0 1 0 6M18.5 6.5a7.8 7.8 0 0 1 0 11"/></symbol>
+  <symbol id="i-muted" viewBox="0 0 24 24"><path d="M4.5 9.5v5H8l4.5 3.5v-12L8 9.5z"/><path d="m16 9.5 5 5M21 9.5l-5 5"/></symbol>
+  <symbol id="i-compare" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2.5"/><path d="M12 3v18"/></symbol>
+  <symbol id="i-pixels" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4.5 9V4.5H9M15 4.5h4.5V9M19.5 15v4.5H15M9 19.5H4.5V15"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><path d="m12 5 7 7-7 7-7-7z"/></symbol>
+  <symbol id="i-key-on" viewBox="0 0 24 24"><path d="m12 5 7 7-7 7-7-7z" fill="currentColor"/></symbol>
+  <symbol id="i-lfo" viewBox="0 0 24 24"><path d="M3 12c2-7 5-7 7 0s5 7 7 0 3.5-4 4-3.5" stroke-width="2"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 15.5V21M8 4h8l-1 6 3 3.5H6L9 10z"/></symbol>
+  <symbol id="i-dice" viewBox="0 0 24 24"><rect x="4.5" y="4.5" width="15" height="15" rx="3.5"/><path d="M9 9h.01M15 9h.01M12 12h.01M9 15h.01M15 15h.01" stroke-width="2.4"/></symbol>
+  <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 4v8M7.5 6.8a7.5 7.5 0 1 0 9 0"/></symbol>
+  <symbol id="i-reset" viewBox="0 0 24 24"><path d="M5 12a7 7 0 1 0 2.2-5.100L4.5 9.500"/><path d="M4.5 5v4.5H9"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12.5h8L17 7"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="m14 7-5 5 5 5"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="m10 7 5 5-5 5"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="m7 14 5-5 5 5"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M8 16 17 7M9.500 7H17v7.5"/></symbol>
+</svg>
+
+<script src="src/shaders.js"></script>
+<script src="src/engine.js"></script>
+<script src="src/params.js"></script>
+<script src="src/automation.js"></script>
+<script src="src/app.js"></script>
+<script src="src/history.js"></script>
+<script src="src/rack.js"></script>
+<script src="src/source.js"></script>
+<script src="src/timeline.js"></script>
+<script src="src/settings.js"></script>
+<script src="src/mp4.js"></script>
+<script src="src/export.js"></script>
+</body>
+</html>
